@@ -1,0 +1,145 @@
+module fc(clk,reset,input_fc_add,input_fc,fc_weights,dout_relu,relu_en,address_out,weight_address,dense_weigts_en,image_address);
+
+parameter DATA_WIDTH =16;
+parameter INPUT_NODES =784;
+parameter OUTPUT_NODES =32;
+parameter FC_PE = 8;
+
+input clk,reset;
+input [31:0]input_fc_add;
+input [DATA_WIDTH -1:0]input_fc;
+input [DATA_WIDTH -1:0]fc_weights;
+//reg [DATA_WIDTH - 1:0] image_buff[INPUT_NODES -1:0];
+//reg [DATA_WIDTH - 1:0] weights_buff[INPUT_NODES*OUTPUT_NODES -1:0];
+output reg[5:0]address_out;
+reg [4:0]fc_weight_address,fcout_address,relu_address;
+output reg relu_en,dense_weigts_en;
+
+reg [FC_PE*DATA_WIDTH -1:0]fc_weight;
+reg [FC_PE*DATA_WIDTH -1:0]cu_weight;
+wire [FC_PE*DATA_WIDTH -1:0] outputfc;
+//reg [DATA_WIDTH -1:0]outputfc_cu[0:OUTPUT_NODES -1];
+reg [DATA_WIDTH -1:0]fc_image,din_relu;
+//reg [DATA_WIDTH -1:0]relu_image[0:OUTPUT_NODES -1];
+reg fc_end,weight_set,internalReset,fcout_end,image_set,cu_clk,relu_end;
+output reg[9:0] image_address;
+output [DATA_WIDTH -1:0]dout_relu;
+output reg[14:0]weight_address;
+
+
+//////////////////////////////////////////////////////
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		fc_image <= 1'b0;
+		image_address <= 1'b0;
+		fc_end <= 1'b0;
+		image_set <= 1'b0;
+	end else if(input_fc_add == INPUT_NODES && fc_end == 1'b0)begin
+		if(image_address < INPUT_NODES && weight_set == 1'b1 && image_set == 1'b0)begin
+			fc_image <= input_fc;
+			image_set <= 1'b1;
+		end else if(image_set == 1'b1)begin
+			image_address <= image_address + 1'b1;
+			image_set <= 1'b0;
+		end else if(image_address == INPUT_NODES)begin
+			fc_end <= 1'b1;
+		end
+	end
+end
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		cu_clk <= 1'b0;
+	end else if(image_set == 1'b1)begin
+		cu_clk <= 1'b1;
+	end else begin
+		cu_clk <= 1'b0;
+	end
+end
+
+
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		fc_weight <= 1'b0;
+		weight_address <= 1'b0;
+		weight_set <= 1'b0;
+		fc_weight_address <=1'b0;
+        dense_weigts_en <=1'b1;
+	end else if(dense_weigts_en == 1'b1 && input_fc_add == INPUT_NODES)begin
+		if(fc_weight_address < FC_PE && weight_address < INPUT_NODES*OUTPUT_NODES)begin
+			fc_weight[fc_weight_address*DATA_WIDTH+:DATA_WIDTH] <= fc_weights;
+			fc_weight_address <= fc_weight_address +1'b1;
+			weight_address <= weight_address +1'b1;
+		end else if(fc_weight_address == FC_PE && weight_set == 1'b0)begin
+			weight_set <= 1'b1;
+			cu_weight <= fc_weight;
+		end else if(weight_set == 1'b1)begin
+			weight_set <= 1'b0;
+			fc_weight_address <= 1'b0;
+		end
+	end
+end
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		fcout_address <= 1'b0;
+		fcout_end <= 1'b0; 
+		relu_en <= 1'b0;
+	end else if(fc_end == 1'b1 && fcout_address < OUTPUT_NODES)begin
+		//outputfc_cu[fcout_address] <= outputfc[fcout_address*DATA_WIDTH+:DATA_WIDTH];
+		din_relu <= outputfc[fcout_address*DATA_WIDTH+:DATA_WIDTH];
+		fcout_address <= fcout_address +1'b1;
+		relu_en <= 1'b1;
+	end else if(fcout_address == OUTPUT_NODES)begin
+		fcout_end <= 1'b1;
+	end
+end
+/*
+always@(posedge clk or posedge reset)begin
+	if(reset ==1'b1)begin
+		relu_address <= 1'b0;
+		relu_end <= 1'b0;
+	end else if(relu_en == 1'b1 && relu_address <OUTPUT_NODES)begin
+		relu_image[relu_address] <= dout_relu;
+		relu_address <= relu_address +1'b1;
+	end else if(relu_address == OUTPUT_NODES)begin
+		relu_end <= 1'b1;
+	end
+end*/
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		address_out <= 1'b0;
+	end else if(relu_en == 1'b1 && address_out < OUTPUT_NODES)begin
+		address_out <= address_out +1'b1;
+	end 
+end
+
+genvar i;
+generate
+		for(i = 0;i <OUTPUT_NODES; i = i + 1)begin:fc1
+			FC_CU  
+			#(
+			     .DATA_WIDTH (DATA_WIDTH)
+			)PE
+			(
+				.clk(cu_clk),
+				.reset(reset),
+				.image(fc_image),
+				.filter(cu_weight[DATA_WIDTH*i+:DATA_WIDTH]),
+				.result(outputfc[DATA_WIDTH*i+:DATA_WIDTH])
+			);
+		end
+endgenerate
+
+
+
+relu relu2(
+    .din_relu(din_relu),
+    .dout_relu(dout_relu)
+);
+
+
+endmodule
+
+                         
