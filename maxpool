@@ -1,0 +1,145 @@
+`timescale 1 ns / 10 ps
+
+module MaxPoolSingle(clk,reset,relu_out,mPoolOut,max_to_pad_en,max_end,row,column,depth,i,j,mPoolIn);
+ 
+parameter DATA_WIDTH = 16;
+parameter H = 28;
+parameter W = 28;
+parameter D = 4;
+parameter MAX = 2;
+parameter MAXD = 4;
+parameter ME = 7;
+
+input clk,reset,relu_out;
+input [DATA_WIDTH -1:0]mPoolIn;
+output reg max_to_pad_en,max_end;
+output reg[DATA_WIDTH -1:0]mPoolOut;
+output reg[5:0]row,column,depth;
+output reg[2:0]i,j;
+///////////////////////////////////////////////////////////
+reg [ME*MAXD*DATA_WIDTH -1:0]max_num;
+reg [ME*MAXD*DATA_WIDTH -1:0]image_to_max;
+//reg [DATA_WIDTH -1:0]image_Buff[0:H*W*D-1];
+reg [DATA_WIDTH -1:0]MaxOut1[0:(H>>1)*(W>>1)*D -1];
+wire  [DATA_WIDTH*ME -1:0]output_max;
+reg [DATA_WIDTH*ME -1:0]output_max_to_ram;
+reg [9:0]k,l,buff_counter;
+reg [4:0]MAX_counter,counter;
+/////////////////////////////////////////////////////test
+reg unit_en,en,ram_en,ram_end;
+/////////////////////////////////////////////////////image_to_ram
+/*
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		input_end <= 1'b0;
+	end else if(relu_out == 1'b1)begin
+		input_end <= 1'b1;
+	end else if(max_en == 1'b1 && relu_out == 1'b0)begin
+		image_Buff [covdata_to_max] <= mPoolIn; 
+    end 
+end*/
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		row <= 1'b0;
+		column <= 1'b0;
+		j <= 1'b0;
+		i <=1'b0;
+		MAX_counter<=1'b0;
+		max_end <= 1'b0;
+		depth <= 1'b0;
+		unit_en <=1'b0;
+	end else if(relu_out == 1'b1 && max_end == 1'b0) begin
+			if(i < 2 && j < 2 && column < H && row < H && depth <D && max_end == 1'b0 && MAX_counter < ME*MAXD)begin
+				image_to_max[MAX_counter*DATA_WIDTH+:DATA_WIDTH] <= mPoolIn;
+				i <= i +1'b1;
+				MAX_counter <= MAX_counter +1'b1;
+				unit_en <= 1'b0;
+			end else if(i == 2) begin
+				j <= j + 1'b1;
+				i <= 1'b0;
+			end else if(j == 2)begin
+				column <= column+2'b10;
+				j <= 1'b0;				
+			end	else if(column == H)begin
+				column <= 1'b0;
+				row <= row +2'b10;
+			end else if(row == H)begin
+				row <= 1'b0;
+				depth <= depth +1'b1;
+			end else if(depth == D && MAX_counter != ME*MAXD)begin
+				max_end <= 1'b1;
+				depth <= 1'b0;
+				unit_en <= 1'b0;
+			end else if(MAX_counter == ME*MAXD)begin
+				max_num <= image_to_max;
+				MAX_counter <= 1'b0;
+				unit_en <= 1'b1;
+			end
+	end 
+end
+
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		en <= 1'b0;
+		counter <= 1'b0;
+		ram_en <= 1'b0;
+		k <=1'b0;
+		l <=1'b0;
+		ram_end<=1'b0;
+		output_max_to_ram <= 1'b0;
+	end else if(unit_en == 1'b1)begin
+		en <= 1'b1;
+	end else if(en ==1'b1 && counter < 2'b11)begin
+		counter <= counter +1'b1;
+	end else if(counter == 2'b11)begin
+		counter <= 1'b0;
+		en <= 1'b0;
+		output_max_to_ram <= output_max;
+		ram_en <= 1'b1;
+	end else if(ram_en == 1'b1 && k < ME)begin
+		MaxOut1[l] <= output_max_to_ram[k*DATA_WIDTH+:DATA_WIDTH];
+		k <= k+1'b1;
+		l <= l+1'b1;
+	end else if(k == ME)begin
+		k <= 1'b0;
+		ram_en <= 1'b0;
+	end else if(l == (H>>1)*(W>>1)*D)begin
+		ram_end <=1'b1;
+	end
+end
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		max_to_pad_en <= 1'b0;
+		buff_counter <= 1'b0;
+	end else if(ram_end == 1'b1)begin
+		if(buff_counter < (H>>1)*(W>>1)*D)begin
+			max_to_pad_en <= 1'b1;
+			mPoolOut <= MaxOut1[buff_counter];
+			buff_counter <= buff_counter+1'b1;
+		end else if(buff_counter == (H>>1)*(W>>1)*D)begin
+			max_to_pad_en <= 1'b0;
+		end
+	end
+end
+
+genvar n;
+generate //generating n convolution units where n is half the number of pixels in one row of the output image
+	for (n = 0; n < 7; n = n + 1) begin :Maxpooling
+		Maxuint
+		#(
+			.DATA_WIDTH(DATA_WIDTH)
+		)max
+		(
+			.clk(clk),
+			.reset(reset),
+			.en(unit_en),
+			.num(max_num[n*MAXD*DATA_WIDTH+:MAXD*DATA_WIDTH]),
+			.MaxOut(output_max[n*DATA_WIDTH+:DATA_WIDTH])
+		);
+	end
+endgenerate
+
+endmodule
