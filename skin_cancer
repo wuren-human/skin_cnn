@@ -1,0 +1,279 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Sep 11 10:13:59 2023
+
+@author: LI
+"""
+# import system libs
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import itertools
+# import Deep learning Libraries
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from sklearn.metrics import confusion_matrix, classification_report
+from tensorflow.keras.optimizers import Adamax
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from sklearn.model_selection import train_test_split
+from keras.utils.np_utils import to_categorical
+from imblearn.over_sampling import RandomOverSampler
+import numpy as np
+import pandas as pd
+from matplotlib import rcParams
+
+
+model_path = 'D:/tf/FPGA/tensorflow/skin/conv_test/cov_test.h5'
+data_dir = 'D:/tf/FPGA/tensorflow/skin/hmnist_28_28_RGB.csv'
+data = pd.read_csv(data_dir)
+data.head()
+Label = data["label"]
+Data = data.drop(columns=["label"])
+data["label"].value_counts()
+label_counts = data["label"].value_counts()
+print(label_counts)
+
+X_total = Data
+y_total = Label
+oversample = RandomOverSampler()
+Data, Label  = oversample.fit_resample(Data, Label)
+Data = np.array(Data).reshape(-1, 28, 28, 3)
+print('Shape of Data :', Data.shape)
+Label = np.array(Label)
+Label
+#Convert abbreviations to it's words
+classes = {0: ('akiec', 'Actinic keratoses and intraepithelial carcinomae'), 
+           1:('bcc' , ' basal cell carcinoma'),
+           2 :('bkl', 'benign keratosis-like lesions'),
+           3: ('df', 'dermatofibroma'),
+           4: ('nv', ' melanocytic nevi'),
+           5: ('vasc', ' pyogenic granulomas and hemorrhage'),
+           6: ('mel', 'melanoma')}
+
+#   train_test_split
+X_train , X_test , y_train , y_test = train_test_split(Data , Label , test_size = 0.2 , random_state = 49)
+
+X_train,X_val,y_train,y_val        =train_test_split(X_train, y_train, test_size=0.25, random_state=42)
+
+#Create Image Data Generation
+datagen = ImageDataGenerator(rescale=(1./255)
+                             ,rotation_range=10
+                             ,zoom_range = 0.1
+                             ,width_shift_range=0.1
+                             ,height_shift_range=0.1)
+
+testgen = ImageDataGenerator(rescale=(1./255))
+#Create ReduceLROnPlateau to learning rate reduction
+
+learning_rate_reduction = ReduceLROnPlateau(monitor='val_accuracy'
+                                            , patience = 2
+                                            , verbose=1
+                                            ,factor=0.5
+                                            , min_lr=0.00001) 
+def cnn():
+    use_bias = False
+    #Model Structure
+    model = keras.models.Sequential()
+    model.add(keras.layers.Input(shape=[28, 28, 3]))
+    model.add(keras.layers.Conv2D(4, (3, 3), activation='relu', padding='same',name='cov1',use_bias = use_bias))
+    model.add(keras.layers.MaxPooling2D(pool_size=(2,2),name='pool1'))
+    model.add(keras.layers.Conv2D(8, (3, 3), activation='relu', padding='same',name='cov2',use_bias=use_bias))
+    model.add(keras.layers.MaxPooling2D(pool_size=(2,2),name='pool2'))
+    model.add(keras.layers.Conv2D(16, (3, 3), activation='relu', padding='same',name='cov3',use_bias = use_bias))
+    model.add(keras.layers.Flatten(name='Flatten'))
+    model.add(keras.layers.Dense(units=32, activation='relu', name='dense',use_bias = use_bias))
+    model.add(keras.layers.Dense(units=7, activation='softmax', name='softmax',use_bias = use_bias))
+    return model
+
+# Set a learning rate annealer
+if os.path.exists(model_path):
+    model = tf.keras.models.load_model(filepath=model_path)
+    print(model.summary())
+else:
+    model.compile(Adamax(learning_rate= 0.001), loss= 'categorical_crossentropy', metrics= ['accuracy'])
+    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+    history = model.fit(X_train ,
+                    y_train,
+                    epochs=100,
+                    batch_size=10,
+                    validation_data=(X_test , y_test) ,
+                    callbacks=[learning_rate_reduction,early_stopping])
+    model.save("D:/tf/FPGA/tensorflow/skin/conv_test/conv_test/10_7.h5")
+    print(model.summary())
+
+train_class_counts = [np.sum(np.argmax(y_train, axis=1) == i) for i in range(len(classes))]
+test_class_counts = [np.sum(np.argmax(y_test, axis=1) == i) for i in range(len(classes))]
+class_names = [classes[i][0] for i in range(len(classes))]
+
+y_true = np.array(y_test)
+y_pred = model.predict(X_test)
+y_pred = np.argmax(y_pred , axis=1)
+y_true = np.argmax(y_true , axis=1) 
+classes_labels = []
+for key in classes.keys():
+    classes_labels.append(key)
+
+print(classes_labels)
+
+cm = confusion_matrix(y_true, y_pred, labels=classes_labels)
+#cm = cm = confusion_matrix(y_true, y_pred, labels=classes_labels)
+proportion=[]
+for i in cm:
+    for j in i:
+        temp=j/(np.sum(i))
+        proportion.append(temp)
+# print(np.sum(confusion_matrix[0]))
+#print(proportion)
+pshow=[]
+for i in proportion:
+    pt="%.2f%%" % (i * 100)
+    pshow.append(pt)
+proportion=np.array(proportion).reshape(7,7)  # reshape
+pshow=np.array(pshow).reshape(7,7)
+#print(pshow)
+config = {
+    "font.family":'Times New Roman', 
+}
+rcParams.update(config)
+plt.imshow(proportion, interpolation='nearest', cmap=plt.cm.PuRd)  
+            # (：'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds','YlOrBr', 'YlOrRd',
+            # 'OrRd', 'PuRd', 'RdPu', 'BuPu','GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn')
+plt.title('confusion_matrix')
+plt.colorbar()
+tick_marks = np.arange(len(classes))
+plt.xticks(tick_marks, classes,fontsize=12)
+plt.yticks(tick_marks, classes,fontsize=12)
+ 
+thresh = cm.max() / 2.
+iters = np.reshape([[[i,j] for j in range(7)] for i in range(7)],(cm.size,2))
+for i, j in iters:
+    if(i==j):
+        plt.text(j, i - 0.12, format(cm[i, j]), va='center', ha='center', fontsize=12,color='white',weight=5)  
+        plt.text(j, i + 0.12, pshow[i, j], va='center', ha='center', fontsize=12,color='white')
+    else:
+        plt.text(j, i-0.12, format(cm[i, j]),va='center',ha='center',fontsize=12)   
+        plt.text(j, i+0.12, pshow[i, j], va='center', ha='center', fontsize=12)
+ 
+plt.ylabel('True label',fontsize=16)
+plt.xlabel('Predict label',fontsize=16)
+plt.tight_layout()
+plt.show()
+
+for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+    plt.text(j, i, cm[i, j], horizontalalignment= 'center', color= 'white' if cm[i, j] > thresh else 'black')
+plt.tight_layout()
+plt.ylabel('True Label')
+plt.xlabel('Predicted Label')
+
+plt.show()    
+
+all_layers = model.layers
+
+dense_layer_count = 0
+for layer in all_layers:
+    if isinstance(layer, tf.keras.layers.Dense):
+        weights = layer.get_weights()
+        if len(weights) > 0:
+            dense_layer_count += 1
+            layer_name = f'dense_layer_{dense_layer_count}'
+            filename = f'{layer_name}_weights.txt'
+            
+
+            np.savetxt(filename, weights[0], delimiter='            ', fmt='%.16f')
+            
+            print(f"Saved weights of {layer_name} to {filename}")
+
+input_image = X_test[0]
+
+for channel in range(3):
+    channel_data = input_image[:, :, channel]
+    filename = f'input_image_channel_{channel}.txt'
+    np.savetxt(filename, channel_data, delimiter='\n', fmt='%f')
+
+middle = Model(inputs=model.input, outputs=model.get_layer('cov1').output)
+results = middle.predict(X_test)[0]
+
+for i in range(results.shape[-1]):  
+    result = results[:, :, i]  
+    filename = f'D:/tf/FPGA/tensorflow/skin/conv_test/conv/conv1_kernel_{i + 1}.csv'
+    np.savetxt(filename, result, delimiter=',')
+ 
+
+middle = Model(inputs=model.input, outputs=model.get_layer('cov1').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1) 
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/test/conv1.csv', result, delimiter=',')
+
+middle = Model(inputs=model.input, outputs=model.get_layer('pool1').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1)
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/test/pool1.csv', result, delimiter=',')
+
+middle = Model(inputs=model.input, outputs=model.get_layer('cov2').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1)
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/test/cov2.csv', result, delimiter=',')
+
+middle = Model(inputs=model.input, outputs=model.get_layer('pool2').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1)
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/test/pool2.csv', result, delimiter=',')
+
+middle = Model(inputs=model.input, outputs=model.get_layer('cov3').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1)
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/conv3.csv', result, delimiter=',')
+
+middle = Model(inputs=model.input, outputs=model.get_layer('Flatten').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1)
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/Flatten.csv', result, delimiter=',')
+
+middle = Model(inputs=model.input, outputs=model.get_layer('dense').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1)
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/dense.csv', result, delimiter=',')
+
+
+middle = Model(inputs=model.input, outputs=model.get_layer('softmax').output)
+result = middle.predict(X_test)[0]
+result = result.reshape(result.shape[0], -1)
+np.savetxt('D:/tf/FPGA/tensorflow/skin/conv_test/softmax.csv', result,delimiter=',')
+
+conv_weights = []
+#dense_weights = []
+
+
+for layer in model.layers:
+    if isinstance(layer, keras.layers.Conv2D):
+        weights = layer.get_weights()
+        if weights:
+            conv_weights.append(weights)
+            
+for i, layer_weights in enumerate(conv_weights):
+    for j, kernel_weights in enumerate(layer_weights):
+        kernel_shape = kernel_weights.shape
+        for k in range(kernel_shape[-1]):
+            layer_name = f'conv{i + 1}_kernel{j + 1}_filter{k + 1}'  
+            filename = f'{layer_name}_weights.txt'
+            filter_weights = kernel_weights[:, :, :, k]
+            flattened_weights = filter_weights.flatten()  
+            np.savetxt(filename, flattened_weights, delimiter=' ', fmt='%.16f')
+
+for i, weights in enumerate(conv_weights):
+    layer_name = f'conv{i + 1}'  
+    filename = f'{layer_name}_weights.txt'
+    flattened_weights = weights[0].flatten() 
+    np.savetxt(filename, flattened_weights, delimiter=' ', fmt='%.16f')
+
+
+for i, weights in enumerate(dense_weights):
+    layer_name = f'dense{i + 1}'  
+    filename = f'{layer_name}_weights.txt'
+    np.savetxt(filename, weights[0], delimiter=' ', fmt='%.16f')
+                
+
