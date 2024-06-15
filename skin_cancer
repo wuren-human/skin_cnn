@@ -57,23 +57,31 @@ classes = {0: ('akiec', 'Actinic keratoses and intraepithelial carcinomae'),
 #   train_test_split
 X_train , X_test , y_train , y_test = train_test_split(Data , Label , test_size = 0.2 , random_state = 49)
 
-X_train,X_val,y_train,y_val        =train_test_split(X_train, y_train, test_size=0.25, random_state=42)
-
 #Create Image Data Generation
 datagen = ImageDataGenerator(rescale=(1./255)
                              ,rotation_range=10
                              ,zoom_range = 0.1
                              ,width_shift_range=0.1
                              ,height_shift_range=0.1)
-
 testgen = ImageDataGenerator(rescale=(1./255))
 #Create ReduceLROnPlateau to learning rate reduction
-
 learning_rate_reduction = ReduceLROnPlateau(monitor='val_accuracy'
                                             , patience = 2
                                             , verbose=1
                                             ,factor=0.5
                                             , min_lr=0.00001) 
+'''
+X_train,X_val,y_train,y_val        =train_test_split(X_train, y_train, test_size=0.25, random_state=42)
+test_data= test_generator.flow_from_dataframe(dataframe=test,x_col="image_full_name",y_col="dx",
+                                              directory="../HAM1000_images",
+                                              shuffle=False,batch_size=1,class_mode=None,target_size=(28,28)) 
+val_data=test_generator.flow_from_dataframe(dataframe=val,x_col="image_full_name",y_col="dx",
+                                            directory="../HAM1000_images",
+                                            batch_size=10,shuffle=False,class_mode="categorical",target_size=(28,28))
+train_data= train_generator.flow_from_dataframe(dataframe=train,x_col="image_full_name",y_col="dx",
+                                                batch_size=10,directory="../HAM1000_images",
+                                                shuffle=True,class_mode="categorical",target_size=(28,28))
+'''
 def cnn():
     use_bias = False
     #Model Structure
