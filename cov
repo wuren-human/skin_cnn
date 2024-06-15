@@ -1,0 +1,365 @@
+`timescale 100 ns / 10 ps
+
+module convlayer(clk,reset,router_out_end,relu_en_d,filter,filter_en,cov_image,relu_to_pool,max_address,relu_end,cov1_address);
+
+parameter DATA_WIDTH = 16;
+parameter D = 4; //Depth of the filter
+parameter H = 16; //Height of the image
+parameter W = 16; //Width of the image
+parameter F = 3; //Size of the filter
+parameter K = 8;
+parameter PE = 7;
+
+////////////////////////////////////////input_cov1
+input clk, reset,router_out_end,filter_en;
+input [DATA_WIDTH -1:0]cov_image;
+input [DATA_WIDTH-1:0]filter;
+output reg relu_en_d;
+output reg [11:0]max_address;
+output wire [DATA_WIDTH -1:0]relu_to_pool;
+output reg relu_end;
+output reg[14:0]cov1_address;
+
+/////////////////////////////////////cov1
+//reg [DATA_WIDTH -1:0] image_buff [0:D*F*F*(H-F+1)*(W-F+1)-1];
+reg filter1_start,filter1_end,outputCU,cu_flag,cu_start,cov_end;
+reg [7:0]filter1_counter;
+reg [11:0]filter1_rd,filter1_address;
+reg [9:0]cov1_counter,cu1_counter,cu_counter;
+reg [4:0]filter1_set;
+reg [4:0]state;
+reg [(PE*D*F*F*DATA_WIDTH)-1:0] cov1_re;
+reg [F*F*D*DATA_WIDTH-1:0] cov1_filter;
+reg [F*F*D*DATA_WIDTH-1:0] cov_filter;
+
+////////////////////////////////////////////CU
+reg [DATA_WIDTH -1:0]Filter[0:F*F*D*K-1];
+reg [(PE*D*F*F*DATA_WIDTH)-1:0] receptiveField;
+wire [PE*DATA_WIDTH-1:0] outputConvUnits;
+/////////////////////////////////////////////////relu1
+reg [PE*DATA_WIDTH-1:0] inputrelu; 
+reg [DATA_WIDTH-1:0]din_relu;
+wire [DATA_WIDTH -1:0]dout_relu;
+////////////////////////////////////////////////////////////
+integer i;
+reg relu_en,internalReset;
+
+////////////////////////////////////////////////cov1_image and filter1
+always@(posedge clk or posedge reset)begin
+	if(reset==1'b1)begin
+		filter1_rd <=1'b0;
+		filter1_start <= 1'b0;
+	end else if(filter_en == 1'b1 && filter1_rd < D*F*F*K)begin
+		filter1_rd <= filter1_rd +1'b1;
+		Filter[filter1_rd] <= filter;
+	end else if(filter1_rd == D*F*F*K)begin
+		filter1_start <= 1'b1;
+	end
+end
+////////////////////////////////////////////////////////cov1_CU
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		cov1_counter <= 1'b0;
+		cov1_address<= 1'b0;
+		filter1_set <= 1'b0;
+		cu_start <= 1'b0;
+		cov1_re <= 1'b0;
+		cu1_counter <=1'b0;
+		cov_end <=1'b0;
+	end else if(router_out_end == 1'b1 && filter1_set <K && cov_end == 1'b0)begin
+			if(cov1_counter == D*F*F*PE)begin
+				receptiveField <= cov1_re;		//cu data ready
+				cov1_counter <= 1'b0;
+				cu1_counter <= cu1_counter+1'b1; //PE +1
+				cu_start <= 1'b1;					//CU CAL START
+			end else if(cu1_counter == ((W-F+1)/PE)*(H-F+1))begin
+				filter1_set <= filter1_set + 1'b1;
+				cu1_counter <= 1'b0;
+				cov1_counter <= 1'b0;
+				cov1_address <= 1'b0;
+			end else if(cov1_counter < D*F*F*PE && cu1_counter < ((W-F+1)/PE)*(H-F+1)) begin
+				cov1_counter <= cov1_counter +1'b1;
+				cov1_address <= cov1_address + 1'b1;
+				cov1_re[cov1_counter*DATA_WIDTH+:DATA_WIDTH] <= cov_image;
+				cu_start <= 1'b0;
+			end 
+	end else if(filter1_set == K)begin
+		cov_end <= 1'b1;
+	end
+end
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		filter1_address <= 1'b0;
+		filter1_counter <= 1'b0;
+		state<=1'b0;
+		filter1_end <=1'b0;
+	end else if(filter1_start == 1'b1 && filter1_end == 1'b0)begin
+		case(state)
+		5'b00000:
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b00001:
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 1)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b00010:
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 2)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b00011:
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				if(filter1_set == K -1)begin
+					state <= 5'b10000;
+				end else begin
+					state <= state + 1'b1;
+				end
+			end else if(filter1_counter < D*F*F && filter1_set == 3)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end 
+		5'b00100:
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 4)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b00101:
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 5)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b00110:
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 6)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b00111://7
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				if(filter1_set == K -1)begin
+					state <= 5'b10000;
+				end else begin
+					state <= state + 1'b1;
+				end
+			end else if(filter1_counter < D*F*F && filter1_set == 7)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01000://8
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 8)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01001://9
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 9)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01010://10
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 10)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01011://11
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 11)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01100://12
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 12)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01101://13
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 13)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01110://14
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 14)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b01111://15
+			if(filter1_counter == D*F*F)begin
+				cov_filter <= cov1_filter;	
+				filter1_counter <= 1'b0;
+				state <= state + 1'b1;
+			end else if(filter1_counter < D*F*F && filter1_set == 15)begin
+				filter1_address <= filter1_address +1'b1;
+				filter1_counter <= filter1_counter +1'b1;
+				cov1_filter[filter1_counter*DATA_WIDTH+:DATA_WIDTH] <= Filter[filter1_address];
+			end
+		5'b10000:filter1_end <= 1'b1;
+		default:state <= 1'b0;
+		endcase	
+	end
+end
+////////////////////////////////////////////////////////////////////////cal_end
+always@(posedge clk or posedge reset)begin
+	if(reset)begin
+		cu_flag <= 1'b0;		//cu_counter start
+		cu_counter <= 1'b0;		
+        outputCU <= 1'b0;
+		internalReset <= 1'b1;
+	end else if(cu_start == 1'b1 && cov_end == 1'b0)begin
+		cu_flag <= 1'b1;
+		internalReset <= 1'b0;
+	end else if(cu_flag == 1'b1 && cu_counter < D*F*F+2)begin
+		cu_counter <= cu_counter + 1'b1;
+	end else if(cu_counter == D*F*F+2)begin
+		outputCU <= 1'b1;
+		cu_counter <= 1'b0;
+		cu_flag <= 1'b0;
+	end else if(outputCU == 1'b1)begin
+		inputrelu <= outputConvUnits;
+		internalReset <= 1'b1;
+		outputCU <= 1'b0;
+	end
+end
+
+
+///////////////////////////////////////////////////////////////////////////
+genvar n;
+generate 
+	for (n = 0; n < 7; n = n + 1) begin :signle1
+		convUnit
+		#(
+			.D(D),
+			.F(F)
+		) CU
+		(
+			.clk(clk),
+			.reset(internalReset),
+			.image(receptiveField[n*D*F*F*DATA_WIDTH+:D*F*F*DATA_WIDTH]),
+			.filter(cov_filter),
+			.result(outputConvUnits[n*DATA_WIDTH+:DATA_WIDTH])
+		);
+	end
+endgenerate
+
+relu relu1(
+    .din_relu(din_relu),
+    .dout_relu(dout_relu)
+);
+assign 			relu_to_pool = dout_relu;
+
+////////////////////////////////////////////////////relu_en counter
+always@(posedge clk)begin
+	if(relu_en == 1'b1 && i < PE  && max_address < (H-F+1)*(H-F+1)*K && relu_end == 1'b0)begin
+			din_relu <= inputrelu[i*DATA_WIDTH+:DATA_WIDTH];
+	end 
+end
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		i <= 1'b0;
+		relu_en <= 1'b0;
+	end else if(outputCU == 1'b1)begin
+		relu_en <= 1'b1;
+	end else if(relu_en == 1'b1 && i < PE && relu_end ==1'b0)begin
+		i <= i+1;
+	end else if(i == PE)begin
+		i <= 1'b0;
+		relu_en <= 1'b0;	
+	end
+end
+
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		max_address <= 1'b0;
+		relu_end <= 1'b0;
+	end else if(relu_en_d == 1'b1 && i < PE && relu_end ==1'b0)begin
+		max_address <= max_address+1'b1;
+	end else if(max_address == (H-F+1)*(W-F+1)*K)begin
+		relu_end <= 1'b1;
+	end 
+end
+always@(posedge clk or posedge reset)begin
+	if(reset == 1'b1)begin
+		relu_en_d <= 1'b0;
+	end else if(relu_en == 1'b1)begin
+		relu_en_d <=1'b1;
+	end else if(relu_en == 1'b0)begin
+		relu_en_d <= 1'b0;
+	end
+end
+
+
+endmodule
+
+
