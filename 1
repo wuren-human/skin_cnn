@@ -5,11 +5,6 @@ from keras import optimizers
 from keras.layers import Dense, Conv2D, Dropout, Flatten, MaxPooling2D
 from keras.applications import ResNet50
 
-
-data=pd.read_csv("../input/skin-cancer-mnist-ham10000/HAM10000_metadata.csv")
-data['image_full_name']=data['image_id']+'.jpg'
-X=data[['image_full_name','dx','lesion_id']]
-
 data=pd.read_csv("../input/skin-cancer-mnist-ham10000/HAM10000_metadata.csv")
 data['image_full_name']=data['image_id']+'.jpg'
 X=data[['image_full_name','dx','lesion_id']]
